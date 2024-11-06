@@ -39,7 +39,6 @@ class FloatingButton(QPushButton):
         if event.buttons() == Qt.LeftButton and self._mousePressPos:
             delta = event.globalPos() - self._mousePressPos
             self.window().move(self._mousePressDelta + delta)
-            # Save the new position whenever the window is moved
             self.window().save_window_position()
         super().mouseMoveEvent(event)
 
@@ -64,7 +63,6 @@ class DraggableWebView(QWebEngineView):
         if event.buttons() == Qt.LeftButton and self._mousePressPos is not None:
             delta = event.globalPos() - self._mousePressPos
             self.window().move(self._mousePressDelta + delta)
-            # Save the new position whenever the window is moved
             self.window().save_window_position()
         super().mouseMoveEvent(event)
 
@@ -79,8 +77,9 @@ class WebViewer(QMainWindow):
         self.settings = QSettings('PQDI', 'WebViewer')
         self.website_loaded = False
         self.expanded_size = QSize(1000, 600)
-        self.collapsed_size = QSize(200, 60)
+        self.collapsed_size = QSize(290, 60)  # Slightly wider to accommodate hide button
         self.base_url = "https://www.pqdi.cc/spells"
+        self.p99_url = "https://wiki.project1999.com/"
         self._mousePressPos = None
         self._mousePressDelta = None
         self.initUI()
@@ -89,16 +88,18 @@ class WebViewer(QMainWindow):
     def save_window_position(self):
         self.settings.setValue('window_position', self.pos())
         self.settings.setValue('window_state', self.website_loaded)
+        self.settings.setValue('current_url', self.web_view.url().toString())
 
     def restore_window_position(self):
         position = self.settings.value('window_position')
         if position:
             self.move(position)
         
-        # Optionally restore the window state (expanded/collapsed)
         was_expanded = self.settings.value('window_state', False, type=bool)
         if was_expanded:
             self.toggle_website()
+            saved_url = self.settings.value('current_url', self.base_url)
+            self.web_view.setUrl(QUrl(saved_url))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -116,7 +117,6 @@ class WebViewer(QMainWindow):
             self._mousePressPos = None
         
     def closeEvent(self, event):
-        # Save position before closing
         self.save_window_position()
         super().closeEvent(event)
         
@@ -124,10 +124,8 @@ class WebViewer(QMainWindow):
         self.setWindowTitle('Project Quarm Database Interface')
         self.resize(self.collapsed_size)
         
-        # Set window to stay on top and be frameless
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
         
-        # Set window transparency
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("""
             QMainWindow {
@@ -135,37 +133,41 @@ class WebViewer(QMainWindow):
             }
         """)
         
-        # Create central widget and layout
         self.central_widget = QWidget()
         self.central_widget.setStyleSheet("background: transparent;")
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
         self.layout.setContentsMargins(5, 5, 5, 15)
         
-        # Create button container
         self.button_container = QWidget()
         self.button_layout = QHBoxLayout(self.button_container)
         self.button_layout.setAlignment(Qt.AlignCenter)
         self.button_layout.setSpacing(5)
         self.layout.addWidget(self.button_container)
         
-        # Create Back button (initially hidden)
         self.back_button = FloatingButton("←", self)
         self.back_button.hide()
         self.back_button.clicked.connect(self.go_back)
         self.button_layout.addWidget(self.back_button)
         
-        # Create main button
         self.float_button = FloatingButton("PQDI", self)
         self.button_layout.addWidget(self.float_button)
-        self.float_button.clicked.connect(self.toggle_website)
+        self.float_button.clicked.connect(lambda: self.load_website(self.base_url))
         
-        # Create close button
+        self.p99_button = FloatingButton("P99", self)
+        self.button_layout.addWidget(self.p99_button)
+        self.p99_button.clicked.connect(lambda: self.load_website(self.p99_url))
+        
+        # Add new Hide button
+        self.hide_button = FloatingButton("Hide", self)
+        self.hide_button.hide()  # Initially hidden
+        self.button_layout.addWidget(self.hide_button)
+        self.hide_button.clicked.connect(self.hide_website)
+        
         self.close_button = FloatingButton("Close", self)
         self.button_layout.addWidget(self.close_button)
         self.close_button.clicked.connect(self.close)
         
-        # Create web view with zoom
         self.web_view = DraggableWebView()
         self.web_view.setZoomFactor(0.8)
         self.web_view.setUrl(QUrl("about:blank"))
@@ -181,22 +183,31 @@ class WebViewer(QMainWindow):
 
     def handle_url_change(self, url):
         if self.website_loaded:
-            if url.toString() != self.base_url:
+            if url.toString() not in [self.base_url, self.p99_url]:
                 self.back_button.show()
             else:
                 self.back_button.hide()
-        
+    
     def go_back(self):
         self.web_view.back()
         
+    def load_website(self, url):
+        if not self.website_loaded:
+            self.toggle_website()
+        self.web_view.setUrl(QUrl(url))
+        
+    def hide_website(self):
+        """Hide the web view and restore original button layout"""
+        if self.website_loaded:
+            self.toggle_website()
+            
     def toggle_website(self):
         if not self.website_loaded:
             # Expand window and show website
             self.resize(self.expanded_size)
             self.web_view.show()
-            self.web_view.setUrl(QUrl(self.base_url))
-            self.float_button.setText("Hide")
             self.close_button.hide()
+            self.hide_button.show()  # Show hide button when expanded
             self.website_loaded = True
             self.setStyleSheet("""
                 QMainWindow {
@@ -209,8 +220,8 @@ class WebViewer(QMainWindow):
             self.web_view.setUrl(QUrl("about:blank"))
             self.web_view.hide()
             self.resize(self.collapsed_size)
-            self.float_button.setText("PQDI")
             self.back_button.hide()
+            self.hide_button.hide()  # Hide the hide button when collapsed
             self.close_button.show()
             self.website_loaded = False
             self.setStyleSheet("""
