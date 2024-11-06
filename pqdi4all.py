@@ -18,7 +18,7 @@ class FloatingButton(QPushButton):
                 font-family: 'Medieval';
                 font-size: 10px;
                 min-width: 40px;
-                max-width: 80px;
+                max-width: 40px;
                 min-height: 20px;
                 max-height: 20px;
             }
@@ -39,6 +39,7 @@ class FloatingButton(QPushButton):
         if event.buttons() == Qt.LeftButton and self._mousePressPos:
             delta = event.globalPos() - self._mousePressPos
             self.window().move(self._mousePressDelta + delta)
+            # Save the new position whenever the window is moved
             self.window().save_window_position()
         super().mouseMoveEvent(event)
 
@@ -63,6 +64,7 @@ class DraggableWebView(QWebEngineView):
         if event.buttons() == Qt.LeftButton and self._mousePressPos is not None:
             delta = event.globalPos() - self._mousePressPos
             self.window().move(self._mousePressDelta + delta)
+            # Save the new position whenever the window is moved
             self.window().save_window_position()
         super().mouseMoveEvent(event)
 
@@ -77,14 +79,8 @@ class WebViewer(QMainWindow):
         self.settings = QSettings('PQDI', 'WebViewer')
         self.website_loaded = False
         self.expanded_size = QSize(1000, 600)
-        self.collapsed_size = QSize(400, 60)  # Increased width to accommodate new buttons
-        self.base_urls = {
-            'pqdi': "https://www.pqdi.cc/spells",
-            'wiki': "https://wiki.project1999.com/",
-            'tradeskill': "https://www.eqtraders.com/articles/article_page.php?article=g12&menustr=040000000000",
-            'prices': "https://www.eqtunnelauctions.com/"
-        }
-        self.current_url = None
+        self.collapsed_size = QSize(200, 60)
+        self.base_url = "https://www.pqdi.cc/spells"
         self._mousePressPos = None
         self._mousePressDelta = None
         self.initUI()
@@ -93,14 +89,13 @@ class WebViewer(QMainWindow):
     def save_window_position(self):
         self.settings.setValue('window_position', self.pos())
         self.settings.setValue('window_state', self.website_loaded)
-        if self.current_url:
-            self.settings.setValue('last_url', self.current_url)
 
     def restore_window_position(self):
         position = self.settings.value('window_position')
         if position:
             self.move(position)
         
+        # Optionally restore the window state (expanded/collapsed)
         was_expanded = self.settings.value('window_state', False, type=bool)
         if was_expanded:
             self.toggle_website()
@@ -121,14 +116,18 @@ class WebViewer(QMainWindow):
             self._mousePressPos = None
         
     def closeEvent(self, event):
+        # Save position before closing
         self.save_window_position()
         super().closeEvent(event)
         
     def initUI(self):
-        self.setWindowTitle('EQ Tools')
+        self.setWindowTitle('Project Quarm Database Interface')
         self.resize(self.collapsed_size)
         
+        # Set window to stay on top and be frameless
         self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
+        
+        # Set window transparency
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("""
             QMainWindow {
@@ -136,40 +135,37 @@ class WebViewer(QMainWindow):
             }
         """)
         
+        # Create central widget and layout
         self.central_widget = QWidget()
         self.central_widget.setStyleSheet("background: transparent;")
         self.setCentralWidget(self.central_widget)
         self.layout = QVBoxLayout(self.central_widget)
         self.layout.setContentsMargins(5, 5, 5, 15)
         
+        # Create button container
         self.button_container = QWidget()
         self.button_layout = QHBoxLayout(self.button_container)
         self.button_layout.setAlignment(Qt.AlignCenter)
         self.button_layout.setSpacing(5)
         self.layout.addWidget(self.button_container)
         
+        # Create Back button (initially hidden)
         self.back_button = FloatingButton("←", self)
         self.back_button.hide()
         self.back_button.clicked.connect(self.go_back)
         self.button_layout.addWidget(self.back_button)
         
-        # Create all site buttons
-        self.site_buttons = {}
+        # Create main button
+        self.float_button = FloatingButton("PQDI", self)
+        self.button_layout.addWidget(self.float_button)
+        self.float_button.clicked.connect(self.toggle_website)
         
-        self.site_buttons['pqdi'] = FloatingButton("PQDI", self)
-        self.site_buttons['wiki'] = FloatingButton("P99 Wiki", self)
-        self.site_buttons['tradeskill'] = FloatingButton("Tradeskill Info", self)
-        self.site_buttons['prices'] = FloatingButton("Trade Prices", self)
-        
-        # Add buttons to layout and connect them
-        for site_id, button in self.site_buttons.items():
-            self.button_layout.addWidget(button)
-            button.clicked.connect(lambda checked, site=site_id: self.load_site(site))
-        
+        # Create close button
         self.close_button = FloatingButton("Close", self)
         self.button_layout.addWidget(self.close_button)
         self.close_button.clicked.connect(self.close)
         
+        # Create web view with zoom
         self.web_view = DraggableWebView()
         self.web_view.setZoomFactor(0.8)
         self.web_view.setUrl(QUrl("about:blank"))
@@ -185,16 +181,21 @@ class WebViewer(QMainWindow):
 
     def handle_url_change(self, url):
         if self.website_loaded:
-            self.current_url = url.toString()
-            self.back_button.setVisible(self.web_view.history().canGoBack())
-
+            if url.toString() != self.base_url:
+                self.back_button.show()
+            else:
+                self.back_button.hide()
+        
     def go_back(self):
         self.web_view.back()
         
-    def load_site(self, site_id):
+    def toggle_website(self):
         if not self.website_loaded:
+            # Expand window and show website
             self.resize(self.expanded_size)
             self.web_view.show()
+            self.web_view.setUrl(QUrl(self.base_url))
+            self.float_button.setText("Hide")
             self.close_button.hide()
             self.website_loaded = True
             self.setStyleSheet("""
@@ -203,21 +204,15 @@ class WebViewer(QMainWindow):
                     border: 2px solid #4A2400;
                 }
             """)
-        
-        self.web_view.setUrl(QUrl(self.base_urls[site_id]))
-        self.current_url = self.base_urls[site_id]
-
-    def toggle_website(self):
-        if not self.website_loaded:
-            self.load_site('pqdi')
         else:
+            # Collapse window and hide website
             self.web_view.setUrl(QUrl("about:blank"))
             self.web_view.hide()
             self.resize(self.collapsed_size)
+            self.float_button.setText("PQDI")
             self.back_button.hide()
             self.close_button.show()
             self.website_loaded = False
-            self.current_url = None
             self.setStyleSheet("""
                 QMainWindow {
                     background: transparent;
